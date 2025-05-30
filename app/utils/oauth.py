@@ -8,7 +8,9 @@ os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 # Environment variables (ensure they're set in your .env or system)
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5000/callback")
+
+# ✅ Sửa mặc định tại đây
+REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5000/api/auth/callback")
 
 def get_google_flow():
     return Flow.from_client_config(
