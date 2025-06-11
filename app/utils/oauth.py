@@ -11,7 +11,7 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 
 # ✅ Sửa mặc định tại đây
 REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5000/api/auth/callback")
-
+print("🔁 REDIRECT URI đang dùng:", REDIRECT_URI)
 def get_google_flow():
     return Flow.from_client_config(
         {

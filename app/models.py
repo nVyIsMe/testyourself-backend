@@ -1,10 +1,14 @@
-from . import db
+# models.py
 from flask_login import UserMixin
 from datetime import datetime
+from flask_sqlalchemy import SQLAlchemy
+
+# models.py
+from app import db  # ✅ import db từ __init__.py
+
 
 class User(db.Model, UserMixin):
     __tablename__ = 'users'
-
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(100), unique=True, nullable=True)
     email = db.Column(db.String(120), unique=True, nullable=True)
@@ -13,8 +17,6 @@ class User(db.Model, UserMixin):
     password = db.Column(db.String(512))
     role = db.Column(db.String(20), default="USER")
     oauth_login = db.Column(db.Boolean, default=False)
-
-    # Quan hệ ngược với Course
     courses = db.relationship("Course", backref="owner", lazy=True)
     favorites = db.relationship("Favorite", backref="user", lazy=True)
     history = db.relationship("StudyHistory", backref="user", lazy=True)
@@ -23,11 +25,10 @@ class Course(db.Model):
     __tablename__ = 'courses'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100))
-    description = db.Column(db.Text)  # Trường mô tả
+    description = db.Column(db.Text)
     owner_id = db.Column(db.Integer, db.ForeignKey('users.id'))
     public = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
     cards = db.relationship("Card", backref="course", cascade="all, delete-orphan", lazy=True)
     favorites = db.relationship("Favorite", backref="course", lazy=True)
     history = db.relationship("StudyHistory", backref="course", lazy=True)
@@ -40,8 +41,6 @@ class Course(db.Model):
             "owner_id": self.owner_id,
             "public": self.public,
             "created_at": self.created_at.isoformat() if self.created_at else None,
-            # Nếu muốn có cả danh sách card, có thể thêm sau
-            # "cards": [card.to_dict() for card in self.cards]
         }
 
 class Card(db.Model):
