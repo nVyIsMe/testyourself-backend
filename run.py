@@ -6,10 +6,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app import create_app
-from app.models import db  # Quan trọng: import db để Flask-Migrate nhận biết
+from app.models import db
 from flask_migrate import Migrate
 
-# Lấy config_name từ biến môi trường, mặc định là 'development'
+# Lấy cấu hình ứng dụng (mặc định là 'development')
 config_name = os.getenv('FLASK_CONFIG', 'development')
 app = create_app(config_name)
 
@@ -17,4 +17,5 @@ app = create_app(config_name)
 migrate = Migrate(app, db)
 
 if __name__ == '__main__':
-    app.run(debug=app.config.get('DEBUG', True))
+    # BẬT DEBUG luôn (không phụ thuộc config file)
+    app.run(debug=True)

@@ -1,8 +1,10 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()  # Tải biến môi trường từ file .env
+# Tải biến môi trường từ file .env
+load_dotenv()
 
+# Khai báo basedir trước khi sử dụng nó
 basedir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 
 class Config:
@@ -11,6 +13,10 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
     GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+
+    # Cấu hình thư mục lưu trữ ảnh
+    UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", os.path.join(basedir, 'uploads'))  # Đường dẫn đến thư mục uploads
+    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}  # Các định dạng ảnh cho phép
 
     @staticmethod
     def init_app(app):
@@ -24,7 +30,7 @@ class DevelopmentConfig(Config):
 class TestingConfig(Config):
     TESTING = True
     DEBUG = True
-    SQLALCHEMY_DATABASE_URI = os.getenv("TEST_DATABASE_URL") or 'sqlite:///:memory:'
+    SQLALCHEMY_DATABASE_URI = os.getenv("TEST_DATABASE_URL") or 'sqlite:///:memory:'  # Cấu hình cho database test
     WTF_CSRF_ENABLED = False
 
 class ProductionConfig(Config):
@@ -32,8 +38,8 @@ class ProductionConfig(Config):
     TESTING = False
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
     if not SQLALCHEMY_DATABASE_URI:
-        # raise ValueError("DATABASE_URL không được đặt trong biến môi trường!")
-        SQLALCHEMY_DATABASE_URI = "placeholder"  # hoặc gán tạm gì cũng được để tránh lỗi
+        SQLALCHEMY_DATABASE_URI = "placeholder"  # Gán tạm giá trị tránh lỗi nếu không có DATABASE_URL
+
 config = {
     'development': DevelopmentConfig,
     'testing': TestingConfig,

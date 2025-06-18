@@ -1,131 +1,267 @@
+import os
+import json # Import json để xử lý dữ liệu options
 from flask import Blueprint, request, jsonify, current_app
 from app.models import db, Course, Card
-from app.auth import token_required  # Import decorator token_required
+from app.auth import token_required
+from werkzeug.utils import secure_filename
 
 courses_bp = Blueprint("courses", __name__)
 
-# Route tạo khóa học mới
+# --- ROUTES CHO KHÓA HỌC (COURSES) ---
+
 @courses_bp.route("/api/courses", methods=["POST"])
 @token_required
 def create_course(current_user):
-    data = request.json or {}
-    name = data.get("name")
-    description = data.get("description", "")
-
-    if not name:
-        return jsonify({"error": "Course name is required"}), 400
-
-    course = Course(name=name, description=description, owner_id=current_user.id)
-    db.session.add(course)
     try:
+        if 'name' not in request.form:
+            return jsonify({"error": "Course name is required"}), 400
+
+        name = request.form.get("name")
+        description = request.form.get("description", "")
+        image = request.files.get("image")
+        image_url = None
+
+        if image:
+            upload_folder = current_app.config['UPLOAD_FOLDER']
+            if not os.path.exists(upload_folder):
+                os.makedirs(upload_folder)
+            
+            filename = secure_filename(image.filename)
+            image_path = os.path.join(upload_folder, filename)
+            image.save(image_path)
+            # Lưu ý: URL trả về cho client không nên chứa đường dẫn tuyệt đối của server
+            image_url = f"uploads/{filename}"
+
+        new_course = Course(
+            name=name, 
+            description=description, 
+            image=image_url, 
+            owner_id=current_user.id
+        )
+        db.session.add(new_course)
         db.session.commit()
+
+        return jsonify({"message": "Course created successfully", "course": new_course.to_dict()}), 201
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Error creating course: {str(e)}")
-        return jsonify({"error": "Database error while creating course", "details": str(e)}), 500
+        return jsonify({"error": "An error occurred while creating the course"}), 500
 
-    return jsonify({"message": "Course created successfully", "course": course.to_dict()}), 201
-
-# Route lấy danh sách khóa học của user
 @courses_bp.route("/api/courses", methods=["GET"])
 @token_required
 def get_courses(current_user):
-    courses = Course.query.filter_by(owner_id=current_user.id).order_by(Course.created_at.desc()).all()
-    return jsonify([c.to_dict() for c in courses])
+    try:
+        # ĐÂY LÀ DÒNG ĐÚNG: Lọc theo owner_id của người dùng hiện tại
+        courses = Course.query.filter_by(owner_id=current_user.id).order_by(Course.id.desc()).all()
+        print(f"--- MY COURSES DEBUG: Found {len(courses)} courses for user {current_user.id}. ---")
+        return jsonify([c.to_dict() for c in courses])
+    except Exception as e:
+        current_app.logger.error(f"Error getting courses for user {current_user.id}: {str(e)}")
+        return jsonify({"error": "Failed to load your courses"}), 500
 
-# Route lấy chi tiết một khóa học
 @courses_bp.route("/api/courses/<int:course_id>", methods=["GET"])
 @token_required
 def get_course(current_user, course_id):
-    course = Course.query.filter_by(id=course_id, owner_id=current_user.id).first()
-
-    if not course:
-        return jsonify({"error": "Course not found or you don't have permission"}), 404
-
-    cards_data = []
-    if hasattr(course, 'cards'):
-        cards = Card.query.filter_by(course_id=course.id).all()
-        cards_data = [card.to_dict() for card in cards]
-
-    course_data = course.to_dict()
-    course_data['cards'] = cards_data
+    course = None
+    # Nếu là admin thì không cần kiểm tra owner_id
+    if current_user.role == "ADMIN":
+        course = Course.query.get_or_404(course_id)
+    else:
+        # User thường chỉ được xem course của mình
+        course = Course.query.filter_by(id=course_id, owner_id=current_user.id).first_or_404()
+    
+    # --- PHẦN SỬA ĐỔI NẰM Ở ĐÂY ---
+    # Lấy dữ liệu của course dưới dạng dictionary
+    course_data = course.to_dict() 
+    
+    # Lấy tất cả các card (câu hỏi) thuộc về course này
+    cards = Card.query.filter_by(course_id=course.id).all()
+    
+    # Thêm danh sách các card đã được chuyển thành dictionary vào course_data
+    course_data['cards'] = [card.to_dict() for card in cards]
+    
+    # Trả về object JSON hoàn chỉnh
     return jsonify(course_data)
 
-# Route cập nhật khóa học
 @courses_bp.route("/api/courses/<int:course_id>", methods=["PUT"])
 @token_required
 def update_course(current_user, course_id):
-    course = Course.query.filter_by(id=course_id, owner_id=current_user.id).first()
-
-    if not course:
-        return jsonify({"error": "Course not found or you don't have permission to update"}), 404
-
-    data = request.json or {}
-    course.name = data.get("name", course.name)
-    course.description = data.get("description", course.description)
-
+    course = Course.query.filter_by(id=course_id, owner_id=current_user.id).first_or_404()
+    
     try:
+        name = request.form.get("name")
+        description = request.form.get("description")
+        image = request.files.get("image")
+
+        if name:
+            course.name = name
+        if description is not None:
+            course.description = description
+        
+        if image:
+            # Xử lý upload ảnh mới (tương tự create_course)
+            upload_folder = current_app.config['UPLOAD_FOLDER']
+            # (Tùy chọn) Xóa ảnh cũ
+            if course.image:
+                old_image_path = os.path.join(upload_folder, os.path.basename(course.image))
+                if os.path.exists(old_image_path):
+                    os.remove(old_image_path)
+
+            filename = secure_filename(image.filename)
+            image.save(os.path.join(upload_folder, filename))
+            course.image = f"uploads/{filename}"
+
         db.session.commit()
+        return jsonify({"message": "Course updated successfully", "course": course.to_dict()})
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Error updating course {course_id}: {str(e)}")
-        return jsonify({"error": "Database error while updating course", "details": str(e)}), 500
+        return jsonify({"error": "An error occurred while updating the course"}), 500
 
-    return jsonify({"message": "Course updated successfully", "course": course.to_dict()})
 
-# Route xóa khóa học
 @courses_bp.route("/api/courses/<int:course_id>", methods=["DELETE"])
 @token_required
 def delete_course(current_user, course_id):
-    course = Course.query.filter_by(id=course_id, owner_id=current_user.id).first()
-
-    if not course:
-        return jsonify({"error": "Course not found or you don't have permission to delete"}), 404
-
+    course = Course.query.filter_by(id=course_id, owner_id=current_user.id).first_or_404()
     try:
         Card.query.filter_by(course_id=course.id).delete()
         db.session.delete(course)
         db.session.commit()
+        return jsonify({"message": "Course deleted successfully"})
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Error deleting course {course_id}: {str(e)}")
-        return jsonify({"error": "Database error while deleting course", "details": str(e)}), 500
+        return jsonify({"error": "Database error while deleting course"}), 500
 
-    return jsonify({"message": "Course deleted successfully"})
 
-# Thêm card vào khóa học
+# --- ROUTES CHO CÂU HỎI (CARDS) TRONG MỘT KHÓA HỌC ---
 @courses_bp.route("/api/courses/<int:course_id>/cards", methods=["POST"])
 @token_required
 def add_card_to_course(current_user, course_id):
-    course = Course.query.filter_by(id=course_id, owner_id=current_user.id).first()
-    if not course:
-        return jsonify({"error": "Course not found or you don't have permission to add cards"}), 404
-
+    course = Course.query.filter_by(id=course_id, owner_id=current_user.id).first_or_404()
     data = request.json or {}
-    front = data.get("front")
-    back = data.get("back")
+    
+    question_text = data.get("questionText")
+    question_type = data.get("type")
 
-    if not front or not back:
-        return jsonify({"error": "Both 'front' and 'back' fields are required for a card"}), 400
+    if not question_text or not question_type:
+        return jsonify({"error": "Question text and type are required"}), 400
 
-    card = Card(front=front, back=back, course_id=course.id)
-    db.session.add(card)
+    # Xây dựng nội dung cho trường 'back' dựa trên loại câu hỏi
+    back_content_data = {"type": question_type}
+    if question_type == 'multipleChoice':
+        back_content_data['options'] = data.get("options", [])
+    elif question_type == 'fillInTheBlank':
+        back_content_data['correctAnswer'] = data.get("correctAnswer", "")
+    
+    # Chuyển toàn bộ object thành một chuỗi JSON để lưu
+    back_content_json = json.dumps(back_content_data)
+    
+    new_card = Card(
+        front=question_text, 
+        back=back_content_json, # Lưu chuỗi JSON vào trường back
+        course_id=course.id
+    )
+    
     try:
+        db.session.add(new_card)
         db.session.commit()
+        return jsonify({"message": "Card added successfully", "card": new_card.to_dict()}), 201
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Error adding card to course {course_id}: {str(e)}")
-        return jsonify({"error": "Database error while adding card", "details": str(e)}), 500
+        return jsonify({"error": "Database error while adding card"}), 500
 
-    return jsonify({"message": "Card added successfully", "card": card.to_dict()}), 201
 
-# Lấy tất cả card của khóa học
 @courses_bp.route("/api/courses/<int:course_id>/cards", methods=["GET"])
 @token_required
 def get_cards_for_course(current_user, course_id):
-    course = Course.query.filter_by(id=course_id, owner_id=current_user.id).first()
-    if not course:
-        return jsonify({"error": "Course not found or you don't have permission"}), 404
-
+    course = Course.query.filter_by(id=course_id, owner_id=current_user.id).first_or_404()
     cards = Card.query.filter_by(course_id=course.id).all()
     return jsonify([card.to_dict() for card in cards])
+
+@courses_bp.route("/api/courses/<int:course_id>/publish", methods=["POST"])
+@token_required
+def publish_course_quiz(current_user, course_id):
+    course = Course.query.filter_by(id=course_id, owner_id=current_user.id).first_or_404()
+    
+    # Lấy danh sách câu hỏi từ frontend gửi lên
+    data = request.json or {}
+    questions_data = data.get("questions", [])
+
+    if not questions_data:
+        return jsonify({"error": "Cannot publish a quiz with no questions"}), 400
+
+    try:
+        # Xóa các câu hỏi (cards) cũ của khóa học này để tránh trùng lặp
+        Card.query.filter_by(course_id=course.id).delete()
+
+        # Thêm lại toàn bộ danh sách câu hỏi mới
+        for q_data in questions_data:
+            question_text = q_data.get("questionText")
+            back_content_data = {
+                "type": q_data.get("type"),
+                "options": q_data.get("options", []),
+                "correctAnswer": q_data.get("correctAnswer", "")
+            }
+            back_content_json = json.dumps(back_content_data)
+
+            new_card = Card(
+                front=question_text, 
+                back=back_content_json,
+                course_id=course.id
+            )
+            db.session.add(new_card)
+
+        # Đánh dấu khóa học là đã xuất bản
+        course.is_published = True
+        
+        db.session.commit()
+        return jsonify({"message": "Quiz published successfully!"})
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error publishing quiz {course_id}: {str(e)}")
+        return jsonify({"error": "An error occurred while publishing the quiz"}), 500
+    
+@courses_bp.route("/api/courses/public", methods=["GET"])
+def get_public_courses():
+    try:
+        # Lấy tất cả các khóa học đã được xuất bản
+        # Sắp xếp theo ID mới nhất lên đầu
+        public_courses = Course.query.filter_by(is_published=True).order_by(Course.id.desc()).all()
+        
+        return jsonify([c.to_dict() for c in public_courses])
+    except Exception as e:
+        current_app.logger.error(f"Error getting public courses: {str(e)}")
+        return jsonify({"error": "Failed to load public courses"}), 500
+# Cho phép admin cập nhật course bất kỳ (không cần là owner)
+@courses_bp.route("/api/admin/courses/<int:course_id>", methods=["PUT"])
+@token_required
+def admin_update_course(current_user, course_id):
+    if current_user.role != 'ADMIN':
+        return jsonify({"error": "Unauthorized"}), 403
+
+    course = Course.query.get_or_404(course_id)
+    try:
+        name = request.form.get("name")
+        description = request.form.get("description")
+        image = request.files.get("image")
+
+        if name:
+            course.name = name
+        if description is not None:
+            course.description = description
+
+        if image:
+            upload_folder = current_app.config['UPLOAD_FOLDER']
+            filename = secure_filename(image.filename)
+            image.save(os.path.join(upload_folder, filename))
+            course.image = f"uploads/{filename}"
+
+        db.session.commit()
+        return jsonify({"message": "Course updated successfully", "course": course.to_dict()})
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Admin update course error: {str(e)}")
+        return jsonify({"error": "Failed to update course"}), 500

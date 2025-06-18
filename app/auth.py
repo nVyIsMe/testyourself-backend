@@ -87,6 +87,9 @@ def login():
     if not user or not check_password_hash(user.password, password):
         return jsonify({"error": "Tài khoản hoặc mật khẩu không đúng"}), 401
 
+    if user.role == "BANNED":
+        return jsonify({"error": "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên."}), 403
+
     access_token = generate_token(user.id)
     refresh_token = generate_refresh_token(user.id)  # Tạo refresh token
 
